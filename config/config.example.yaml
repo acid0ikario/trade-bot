@@ -1,0 +1,19 @@
+exchange: "binance"
+symbol: "BTC/USDT"
+timeframe: "1h"
+slippage_bps: 5
+fees:
+  maker: 0.001
+  taker: 0.001
+risk_rr: 2.0
+atr_period: 14
+atr_k: 1.5
+ema_fast: 50
+ema_slow: 200
+rsi_period: 14
+rsi_buy_min: 45
+rsi_buy_max: 60
+max_notional_per_trade_usdt: 200
+max_open_trades: 1
+paper_trading: true
+telegram_enabled: false
