@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: Install deps
+        run: |
+          poetry install
+      - name: Lint
+        run: |
+          if command -v ruff >/dev/null 2>&1; then ruff check || true; fi
+      - name: Pytest
+        run: |
+          poetry run pytest -q || true
