@@ -17,3 +17,5 @@ max_notional_per_trade_usdt: 200
 max_open_trades: 1
 paper_trading: true
 telegram_enabled: false
+symbols_whitelist:
+  - "BTC/USDT"

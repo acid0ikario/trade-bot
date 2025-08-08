@@ -34,6 +34,9 @@ class AppConfig(BaseModel):
     paper_trading: bool = True
     telegram_enabled: bool = False
 
+    # New: whitelist of tradable symbols
+    symbols_whitelist: list[str] = Field(default_factory=lambda: ["BTC/USDT"])
+
 
 class EnvVars(BaseModel):
     BINANCE_API_KEY: Optional[str] = None
