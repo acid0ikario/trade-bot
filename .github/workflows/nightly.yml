@@ -1,0 +1,33 @@
+name: Nightly Backtests
+
+on:
+  schedule:
+    - cron: '30 0 * * *' # 00:30 UTC daily
+  workflow_dispatch:
+
+jobs:
+  nightly:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: Install deps
+        run: |
+          poetry install
+      - name: Prepare artifacts dir
+        run: |
+          mkdir -p data/artifacts
+      - name: Run placeholder backtest
+        run: |
+          poetry run python -m bot.backtest --symbol BTC/USDT --timeframe 1h --years 1 || true
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-artifacts
+          path: data/artifacts

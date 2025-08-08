@@ -1,0 +1,31 @@
+[tool.poetry]
+name = "trade-bot"
+version = "0.1.0"
+description = "Spot crypto trading bot (BTC/USDT first) with safety-first design"
+authors = ["You <you@example.com>"]
+readme = "README.md"
+packages = [{ include = "bot", from = "src" }]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+ccxt = "*"
+backtesting = "*"
+pandas = "*"
+numpy = "*"
+scipy = "*"
+ta = "*"
+pydantic = "^2.7.0"
+loguru = "*"
+python-telegram-bot = "*"
+python-dotenv = "*"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "*"
+ruff = "*"
+
+[tool.ruff]
+line-length = 100
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
