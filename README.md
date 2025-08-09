@@ -45,3 +45,13 @@ docker run --rm --env-file .env -v $PWD/config:/app/config -v $PWD/data:/app/dat
 6. Nightly CI with regression issues
 7. Go-live checklist
 
+## CI Nightly Regression Checks
+
+Nightly workflow runs a small backtest grid, evaluates metrics, and uploads artifacts.
+
+- Artifacts: `data/artifacts/backtest_results.csv` and `data/artifacts/summary.json` uploaded as `nightly-artifacts`.
+- Thresholds (override via repository Variables):
+  - `SHARPE_THRESHOLD` (default `1.0`)
+  - `MAX_DD_THRESHOLD` (default `-0.20`)
+- On regression, a GitHub Issue is created using the Backtest Regression template with key metrics and links to artifacts.
+

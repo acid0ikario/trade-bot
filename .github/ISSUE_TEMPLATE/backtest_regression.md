@@ -1,16 +1,26 @@
 ---
 name: Backtest Regression
-about: Regression detected in nightly backtest performance.
+about: Regression detected in nightly backtest performance
 title: "Nightly backtest regression: {{ date }}"
-labels: regression, backtest
-assignees: ''
+labels: [regression, backtest]
+assignees: []
 ---
+
 ## Summary
-A nightly backtest run detected potential performance regression.
 
-- **Best Sharpe Ratio:** {{ best_sharpe }}
-- **Worst Max Drawdown:** {{ worst_dd }}
+A performance regression was detected in the nightly backtest run.
 
-See the attached artifacts for full details.
+- Best Sharpe: `{{ best_sharpe }}`
+- Worst Max Drawdown: `{{ worst_dd }}`
 
-**Please investigate the parameter set(s) and recent code changes.**
+### Thresholds
+- SHARPE_THRESHOLD: `{{ sharpe_threshold }}`
+- MAX_DD_THRESHOLD: `{{ max_dd_threshold }}`
+
+### Artifacts
+See the uploaded `nightly-artifacts` for CSV and summary JSON.
+
+### Action items
+- [ ] Investigate parameter grid changes
+- [ ] Review recent commits affecting strategy or risk
+- [ ] Re-run locally to reproduce

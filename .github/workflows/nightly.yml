@@ -23,11 +23,43 @@ jobs:
       - name: Prepare artifacts dir
         run: |
           mkdir -p data/artifacts
-      - name: Run placeholder backtest
+      - name: Run backtest
         run: |
           poetry run python -m bot.backtest --symbol BTC/USDT --timeframe 1h --years 1 || true
+      - name: Evaluate metrics and set outputs
+        id: eval
+        env:
+          SHARPE_THRESHOLD: ${{ vars.SHARPE_THRESHOLD || '1.0' }}
+          MAX_DD_THRESHOLD: ${{ vars.MAX_DD_THRESHOLD || '-0.20' }}
+        run: |
+          set -e
+          test -f data/artifacts/backtest_results.csv
+          poetry run python -m bot.ci_regression --csv data/artifacts/backtest_results.csv --out data/artifacts/summary.json
       - name: Upload artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: nightly-artifacts
           path: data/artifacts
+      - name: Create regression issue
+        if: steps.eval.outputs.regression_detected == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = JSON.parse(fs.readFileSync('data/artifacts/summary.json', 'utf8'));
+            const title = `Nightly backtest regression detected`;
+            const body = `## Summary\n\n`+
+              `Best Sharpe: ${summary.best_sharpe}\n`+
+              `Worst Max Drawdown: ${summary.worst_dd}\n\n`+
+              `### Thresholds\n`+
+              `SHARPE_THRESHOLD: ${summary.thresholds.SHARPE_THRESHOLD}\n`+
+              `MAX_DD_THRESHOLD: ${summary.thresholds.MAX_DD_THRESHOLD}\n\n`+
+              `Artifacts: see the 'nightly-artifacts' uploaded with this run.`;
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              labels: ['regression', 'backtest'],
+              body,
+            });
