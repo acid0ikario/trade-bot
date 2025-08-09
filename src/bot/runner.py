@@ -10,7 +10,7 @@ import pandas as pd
 from .logger import setup_logger
 from .config import load_config, AppConfig, EnvVars
 from .notifier import Notifier
-from .exchange import Exchange
+from .exchange import Exchange, ExchangeError
 from .strategy import generate_signal
 from .position import position_size
 from .risk import compute_stop, max_daily_loss_guard, kill_switch
@@ -185,18 +185,29 @@ def main():
         chat_id=env.TELEGRAM_CHAT_ID,
     )
 
+    paper = bool(getattr(args, "paper", False))
+    live = bool(getattr(args, "live", False))
+    dry_run = bool(getattr(args, "dry_run", False))
+    iters_arg = int(getattr(args, "iterations", 0) or 0)
+
     banner = (
         f"trade-bot starting | exchange={cfg.exchange} tf={cfg.timeframe} "
-        f"paper={args.paper} live={args.live} dry_run={args.dry_run}"
+        f"paper={paper} live={live} dry_run={dry_run}"
     )
     logger.info(banner)
     notifier.send(banner)
 
-    iters = args.iterations if args.iterations > 0 else 3
-    if args.paper and not args.live:
-        run_paper(cfg, env, max_iterations=iters, sleep_seconds=0)
-    elif args.live:
-        run_live(cfg, env, dry_run=args.dry_run, max_iterations=iters, sleep_seconds=0)
+    iters = iters_arg if iters_arg > 0 else 3
+    if paper and not live:
+        try:
+            run_paper(cfg, env, max_iterations=iters, sleep_seconds=0)
+        except ExchangeError as e:
+            logger.warning(f"paper mode aborted due to exchange error: {e}")
+    elif live:
+        try:
+            run_live(cfg, env, dry_run=dry_run, max_iterations=iters, sleep_seconds=0)
+        except ExchangeError as e:
+            logger.warning(f"live mode aborted due to exchange error: {e}")
     else:
         logger.info("No mode selected. Use --paper or --live.")
 
