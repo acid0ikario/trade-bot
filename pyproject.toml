@@ -18,6 +18,7 @@ pydantic = "^2.7.0"
 loguru = "*"
 python-telegram-bot = "*"
 python-dotenv = "*"
+PyYAML = "*"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "*"

@@ -61,7 +61,15 @@ class FakeCCXTBinance:
 
     def create_order(self, symbol, type_, side, amount, price=None, params=None):
         self.calls["create_order"] += 1
-        order = {"id": f"order_{len(self._orders)+1}", "symbol": symbol, "type": type_, "side": side, "amount": amount, "price": price, "params": params}
+        order = {
+            "id": f"order_{len(self._orders)+1}",
+            "symbol": symbol,
+            "type": type_,
+            "side": side,
+            "amount": amount,
+            "price": price,
+            "params": params,
+        }
         self._orders.append(order)
         return order
 
@@ -91,6 +99,15 @@ def test_price_fetch_returns_float(cfg_env):
     ex = Exchange(cfg, env)
     price = ex.get_price("BTC/USDT")
     assert isinstance(price, float) and price > 0
+
+
+def test_missing_price_in_ticker_raises(cfg_env, mock_ccxt):
+    cfg, env = cfg_env
+    fake = mock_ccxt
+    fake._ticker = {}
+    ex = Exchange(cfg, env)
+    with pytest.raises(ExchangeError):
+        ex.get_price("BTC/USDT")
 
 
 def test_ohlcv_shape(cfg_env):
@@ -123,6 +140,14 @@ def test_symbol_not_in_whitelist_raises(cfg_env):
         ex.get_price("ETH/USDT")
 
 
+def test_qty_below_min_raises(cfg_env, monkeypatch):
+    cfg, env = cfg_env
+    ex = Exchange(cfg, env)
+    monkeypatch.setattr(ex, "get_price", lambda s: 50000.0)
+    with pytest.raises(ExchangeError):
+        ex.create_market_buy("BTC/USDT", 0.00001)
+
+
 def test_qty_floored_to_lot_step(cfg_env, monkeypatch):
     cfg, env = cfg_env
     ex = Exchange(cfg, env)
@@ -143,3 +168,12 @@ def test_retries_on_transient_error_then_success(cfg_env, mock_ccxt):
     ex = Exchange(cfg, env, max_retries=2, backoff_base_delay=0.0)
     price = ex.get_price("BTC/USDT")
     assert isinstance(price, float)
+
+
+def test_oco_returns_order_ids(cfg_env):
+    cfg, env = cfg_env
+    ex = Exchange(cfg, env)
+    result = ex.place_oco_takeprofit_stoploss(
+        "BTC/USDT", qty=0.001, tp_price=60000.0, sl_price=45000.0
+    )
+    assert "tp_order_id" in result and "sl_order_id" in result
