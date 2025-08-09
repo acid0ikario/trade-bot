@@ -14,8 +14,13 @@ rsi_period: 14
 rsi_buy_min: 45
 rsi_buy_max: 60
 max_notional_per_trade_usdt: 200
-max_open_trades: 1
+max_notional_usdt_per_pair: 200
+max_correlated_trades: 2
+correlation_threshold: 0.85
+max_open_trades: 3
 paper_trading: true
 telegram_enabled: false
 symbols_whitelist:
   - "BTC/USDT"
+  - "ETH/USDT"
+  - "BNB/USDT"
