@@ -1,6 +1,4 @@
-from __future__ import annotations
-from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 import yaml
 from pydantic import BaseModel, Field
@@ -35,7 +33,7 @@ class AppConfig(BaseModel):
     telegram_enabled: bool = False
 
     # New: whitelist of tradable symbols
-    symbols_whitelist: list[str] = Field(default_factory=lambda: ["BTC/USDT"])
+    symbols_whitelist: List[str] = Field(default_factory=lambda: ["BTC/USDT"])
 
 
 class EnvVars(BaseModel):
@@ -48,11 +46,18 @@ class EnvVars(BaseModel):
     RISK_PER_TRADE_PCT: float = 0.01
 
 
-def load_config(path: str | Path) -> tuple[AppConfig, EnvVars]:
+def load_config(path):
+    # type: (str) -> tuple[AppConfig, EnvVars]
     load_dotenv()
     with open(path, "r", encoding="utf-8") as f:
         raw = yaml.safe_load(f)
     cfg = AppConfig(**raw)
-    env_values = {k: os.getenv(k) for k in EnvVars.model_fields.keys()}
+    # Pydantic v2 uses model_fields, v1 uses __fields__; support both
+    field_names = []  # type: List[str]
+    if hasattr(EnvVars, "model_fields"):
+        field_names = list(getattr(EnvVars, "model_fields").keys())
+    elif hasattr(EnvVars, "__fields__"):
+        field_names = list(getattr(EnvVars, "__fields__").keys())
+    env_values = {k: os.getenv(k) for k in field_names}
     env = EnvVars(**{k: v for k, v in env_values.items() if v is not None})
     return cfg, env
