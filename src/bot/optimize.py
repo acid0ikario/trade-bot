@@ -117,9 +117,6 @@ def run_ab(symbol: str, timeframe: str, years: int, cfg: AppConfig, data_loader=
         cfg_copy = cfg.copy()
         for k, v in flags.items():
             setattr(cfg_copy, k, v)
-        # also set sensible periods
-        setattr(cfg_copy, "vol_sma_period", getattr(cfg_copy, "vol_sma_period", 20))
-        setattr(cfg_copy, "adx_period", getattr(cfg_copy, "adx_period", 14))
         results = run_backtest(symbol, timeframe, years, cfg_copy, {"ema_fast": [cfg_copy.ema_fast], "ema_slow": [cfg_copy.ema_slow], "rsi_period": [cfg_copy.rsi_period], "rsi_buy_min": [cfg_copy.rsi_buy_min], "rsi_buy_max": [cfg_copy.rsi_buy_max] }, data_loader=data_loader)
         m = _collect_metrics(results)
         rows.append({"variant": name, **m})
