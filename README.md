@@ -18,6 +18,7 @@ cp config/config.example.yaml config/config.yaml
 
 # Run tests
 poetry run pytest -q
+/home/repos/trade-bot/.venv/bin/python -m pytest -q
 
 # Run (stub runner)
 poetry run python -m bot.runner --paper --config config/config.yaml
