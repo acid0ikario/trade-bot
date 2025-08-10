@@ -4,6 +4,8 @@ from pathlib import Path
 from time import sleep
 from datetime import datetime
 from typing import Dict, Optional
+import threading
+import time
 
 import pandas as pd
 
@@ -15,6 +17,150 @@ from .strategy import generate_signal
 from .position import position_size
 from .risk import compute_stop, max_daily_loss_guard, kill_switch
 from .paper import PaperBroker
+
+
+def watch_open_orders(exchange, symbol: str, poll_sec: float, logger):
+    """
+    Watcher that monitors open and recently closed orders for a symbol and
+    cancels the opposite leg of an emulated OCO (TP/SL) when one fills.
+
+    - Uses the exchange wrapper retries if available (exchange._with_retries).
+    - Detects TP vs SL by inspecting order 'type' (limit => TP, contains 'stop' => SL).
+    - In dry-run mode (if exchange.dry_run is True), only logs intended actions.
+    - Runs in a daemon thread and exits when there are no open orders left for the symbol
+      or when no actionable state persists across polls.
+    """
+
+    def _with_retries(fn):
+        if hasattr(exchange, "_with_retries") and callable(getattr(exchange, "_with_retries")):
+            return exchange._with_retries(fn)
+        return fn()
+
+    def _fetch_open():
+        def op():
+            # Prefer wrapper's client if present
+            if hasattr(exchange, "client") and hasattr(exchange.client, "fetch_open_orders"):
+                return exchange.client.fetch_open_orders(symbol)
+            # Fallback to direct method on fake exchange in tests
+            if hasattr(exchange, "fetch_open_orders"):
+                return exchange.fetch_open_orders(symbol)
+            return []
+
+        return _with_retries(op)
+
+    def _fetch_closed():
+        def op():
+            if hasattr(exchange, "client") and hasattr(exchange.client, "fetch_closed_orders"):
+                return exchange.client.fetch_closed_orders(symbol)
+            if hasattr(exchange, "fetch_closed_orders"):
+                return exchange.fetch_closed_orders(symbol)
+            # Last resort: try fetch_orders and filter by status
+            if hasattr(exchange, "client") and hasattr(exchange.client, "fetch_orders"):
+                all_orders = exchange.client.fetch_orders(symbol)
+                return [o for o in all_orders if str(o.get("status", "")).lower() in ("closed", "filled")]
+            return []
+
+        return _with_retries(op)
+
+    def _cancel(order_id: str):
+        def op():
+            if hasattr(exchange, "client") and hasattr(exchange.client, "cancel_order"):
+                return exchange.client.cancel_order(order_id, symbol)
+            if hasattr(exchange, "cancel_order"):
+                return exchange.cancel_order(order_id, symbol)
+            # Nothing to do
+            return None
+
+        return _with_retries(op)
+
+    dry_run = bool(getattr(exchange, "dry_run", False))
+
+    canceled: set[str] = set()
+    stop_flag = threading.Event()
+
+    def is_stop(order: dict) -> bool:
+        t = str(order.get("type", "")).lower()
+        if t:
+            return "stop" in t
+        info_t = str(((order.get("info", {}) or {}).get("type", ""))).lower()
+        return "stop" in info_t
+
+    def _loop():
+        idle_rounds = 0
+        while not stop_flag.is_set():
+            try:
+                open_orders = _fetch_open() or []
+                closed_orders = _fetch_closed() or []
+            except Exception as e:
+                logger.warning(f"{symbol} watcher: fetch orders failed: {e}")
+                open_orders, closed_orders = [], []
+
+            # Normalize
+            open_orders = [o for o in open_orders if isinstance(o, dict)]
+            closed_orders = [o for o in closed_orders if isinstance(o, dict)]
+
+            # Exit if no open orders tracked
+            if not open_orders:
+                idle_rounds += 1
+                if idle_rounds >= 2:
+                    break
+                # Short sleep then re-check once more to be safe
+                time.sleep(max(poll_sec, 0.05))
+                continue
+
+            filled = [
+                o for o in closed_orders if str(o.get("status", "")).lower() in ("closed", "filled")
+            ]
+            took_action = False
+            for fo in filled:
+                fid = str(fo.get("id") or "")
+                fprice = fo.get("price")
+                f_is_stop = is_stop(fo)
+                # Find opposite open leg
+                for oo in list(open_orders):
+                    oid = str(oo.get("id") or "")
+                    if not oid or oid in canceled:
+                        continue
+                    if str(oo.get("side", fo.get("side", "sell"))).lower() != "sell":
+                        # We expect both legs are sells for a long position
+                        continue
+                    o_is_stop = is_stop(oo)
+                    # Opposite means one is stop and the other is not
+                    if o_is_stop == f_is_stop:
+                        continue
+
+                    action_msg = (
+                        f"{symbol} watcher: filled id={fid} ({'SL' if f_is_stop else 'TP'}) price={fprice} -> "
+                        f"cancel opposite id={oid} ({'SL' if o_is_stop else 'TP'}) price={oo.get('price')}"
+                    )
+                    if dry_run:
+                        logger.info(f"DRY-RUN {action_msg}")
+                        canceled.add(oid)  # mark as if handled to ensure idempotency in dry-run
+                        took_action = True
+                        continue
+
+                    try:
+                        _cancel(oid)
+                        logger.info(action_msg)
+                        canceled.add(oid)
+                        took_action = True
+                    except Exception as e:
+                        logger.warning(f"{symbol} watcher: cancel failed for {oid}: {e}")
+
+            if not took_action:
+                idle_rounds += 1
+            else:
+                idle_rounds = 0
+
+            # Exit condition: when there are no more open orders or after a couple idle rounds
+            if not open_orders or idle_rounds >= 3:
+                break
+
+            time.sleep(max(poll_sec, 0.05))
+
+    th = threading.Thread(target=_loop, name=f"watcher-{symbol}", daemon=True)
+    th.start()
+    return th
 
 
 def run_paper(cfg: AppConfig, env: EnvVars, *, max_iterations: int = 3, sleep_seconds: int = 0):
@@ -154,6 +300,8 @@ def run_live(cfg: AppConfig, env: EnvVars, *, dry_run: bool = False, max_iterati
         raise ValueError("symbols_whitelist and max_notional_per_trade_usdt must be set for live mode")
 
     ex = Exchange(cfg, env)
+    # Propagate dry-run flag to exchange for watcher awareness
+    setattr(ex, "dry_run", bool(dry_run))
 
     def per_pair_cap(symbol: str) -> float:
         if cfg.pair_caps and symbol in cfg.pair_caps:
@@ -257,6 +405,8 @@ def run_live(cfg: AppConfig, env: EnvVars, *, dry_run: bool = False, max_iterati
                 logger.info(msg)
                 notifier.send(msg)
                 last_signal_ts[symbol] = ref_ts
+                # In dry-run we also log what watcher would do (no thread spawned)
+                logger.info(f"DRY-RUN watcher active for {symbol}: would cancel opposite leg if one fills")
                 continue
 
             # Place real orders
@@ -269,6 +419,12 @@ def run_live(cfg: AppConfig, env: EnvVars, *, dry_run: bool = False, max_iterati
             )
             logger.info(msg)
             notifier.send(msg)
+
+            # Start watcher for this symbol to manage OCO cancellation on fill
+            try:
+                watch_open_orders(ex, symbol, poll_sec=max(sleep_seconds, 0.25), logger=logger)
+            except Exception as e:
+                logger.warning(f"Failed to start watcher for {symbol}: {e}")
 
         if sleep_seconds:
             sleep(sleep_seconds)
