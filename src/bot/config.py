@@ -31,6 +31,9 @@ class AppConfig(BaseModel):
     enable_adx: bool = False
     enable_vol_filter: bool = False
     volume_factor: float = 1.5
+    adx_threshold: float = 20.0
+    vol_sma_period: int = 20
+    adx_period: int = 14
 
     # Legacy per-trade cap (kept for backward compatibility)
     max_notional_per_trade_usdt: float = 200

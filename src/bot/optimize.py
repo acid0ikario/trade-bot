@@ -35,7 +35,7 @@ def _top_quartile(df: pd.DataFrame) -> pd.DataFrame:
     # Rank by Sharpe desc, then MaxDD desc (less negative is better)
     df = df.copy()
     # Convert columns to float where possible
-    for col in ["sharpe", "max_dd"]:
+    for col in ["sharpe", "max_dd", "pf", "cagr", "n_trades"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     df = df.dropna(subset=["sharpe", "max_dd"])  # require both
@@ -79,9 +79,20 @@ def write_yaml(path: Path, obj: Dict[str, Any]) -> None:
         yaml.safe_dump(obj, f, sort_keys=True)
 
 
-def optimize_from_csv(csv_path: Path, out_path: Path) -> Dict[str, Any]:
+def optimize_from_csv(csv_path: Path, out_path: Path, *, pf_min: float = 1.0, cagr_min: float = 0.0, max_dd_max: float = 0.40, ntrades_min: int = 50) -> Dict[str, Any]:
     df = pd.read_csv(csv_path)
-    top = _top_quartile(df)
+    # Apply constraints
+    for col in ["pf", "cagr", "max_dd", "n_trades", "sharpe"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    filt = (
+        (df.get("pf", 0) > pf_min)
+        & (df.get("cagr", 0) > cagr_min)
+        & (df.get("max_dd", 1) <= max_dd_max)
+        & (df.get("n_trades", 0) >= ntrades_min)
+    )
+    df2 = df[filt].copy()
+    top = _top_quartile(df2)
     recs = _recommend_defaults(top)
     write_yaml(out_path, recs)
     return recs
@@ -99,7 +110,7 @@ def _ab_variants() -> List[Tuple[str, Dict[str, Any]]]:
 def _collect_metrics(results: List[Dict[str, Any]]) -> Dict[str, float]:
     # Aggregate useful metrics from a single backtest run (use last record)
     if not results:
-        return {"sharpe": 0.0, "max_dd": 0.0, "winrate": 0.0, "pf": 0.0, "expectancy": 0.0, "cagr": 0.0}
+        return {"sharpe": 0.0, "max_dd": 0.0, "winrate": 0.0, "pf": 0.0, "expectancy": 0.0, "cagr": 0.0, "n_trades": 0}
     r = results[-1]
     return {
         "sharpe": float(r.get("sharpe", 0.0)),
@@ -108,6 +119,7 @@ def _collect_metrics(results: List[Dict[str, Any]]) -> Dict[str, float]:
         "pf": float(r.get("pf", 0.0)),
         "expectancy": float(r.get("expectancy", 0.0)),
         "cagr": float(r.get("cagr", 0.0)),
+        "n_trades": int(r.get("n_trades", 0)),
     }
 
 
@@ -117,7 +129,21 @@ def run_ab(symbol: str, timeframe: str, years: int, cfg: AppConfig, data_loader=
         cfg_copy = cfg.copy()
         for k, v in flags.items():
             setattr(cfg_copy, k, v)
-        results = run_backtest(symbol, timeframe, years, cfg_copy, {"ema_fast": [cfg_copy.ema_fast], "ema_slow": [cfg_copy.ema_slow], "rsi_period": [cfg_copy.rsi_period], "rsi_buy_min": [cfg_copy.rsi_buy_min], "rsi_buy_max": [cfg_copy.rsi_buy_max] }, data_loader=data_loader)
+        # ensure thresholds available
+        if not hasattr(cfg_copy, "adx_threshold"):
+            setattr(cfg_copy, "adx_threshold", 20.0)
+        if not hasattr(cfg_copy, "vol_sma_period"):
+            setattr(cfg_copy, "vol_sma_period", 20)
+        if not hasattr(cfg_copy, "volume_factor"):
+            setattr(cfg_copy, "volume_factor", 1.5)
+        results = run_backtest(
+            symbol,
+            timeframe,
+            years,
+            cfg_copy,
+            {"ema_fast": [cfg_copy.ema_fast], "ema_slow": [cfg_copy.ema_slow], "rsi_period": [cfg_copy.rsi_period], "rsi_buy_min": [cfg_copy.rsi_buy_min], "rsi_buy_max": [cfg_copy.rsi_buy_max]},
+            data_loader=data_loader,
+        )
         m = _collect_metrics(results)
         rows.append({"variant": name, **m})
     return pd.DataFrame(rows)
@@ -132,7 +158,7 @@ def save_ab_results(df: pd.DataFrame, out_csv: Path, out_summary: Path) -> None:
         "A/B Backtest Summary:",
         df.to_string(index=False),
         "",
-        f"Best variant: {best['variant']} (Sharpe={best['sharpe']:.3f}, MaxDD={best['max_dd']:.3f})",
+        f"Best variant: {best['variant']} (Sharpe={best['sharpe']:.3f}, MaxDD={best['max_dd']:.3f}, n_trades={int(best['n_trades'])})",
     ]
     out_summary.write_text("\n".join(lines), encoding="utf-8")
 
@@ -144,6 +170,11 @@ def main():
     p.add_argument("--symbol", type=str, default="BTC/USDT")
     p.add_argument("--timeframe", type=str, default="1h")
     p.add_argument("--years", type=int, default=1)
+    # Optimizer constraints
+    p.add_argument("--pf-min", type=float, default=1.0)
+    p.add_argument("--cagr-min", type=float, default=0.0)
+    p.add_argument("--max-dd-max", type=float, default=0.40)
+    p.add_argument("--ntrades-min", type=int, default=50)
     args = p.parse_args()
 
     artifacts = Path("data/artifacts")
@@ -154,7 +185,7 @@ def main():
     if args.results:
         csv_path = Path(args.results)
         out = artifacts / "optimized_defaults.yaml"
-        rec = optimize_from_csv(csv_path, out)
+        rec = optimize_from_csv(csv_path, out, pf_min=args.pf_min, cagr_min=args.cagr_min, max_dd_max=args.max_dd_max, ntrades_min=args.ntrades_min)
         print(f"Wrote {out}: {rec}")
 
     if args.ab:

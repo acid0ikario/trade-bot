@@ -4,6 +4,7 @@ import argparse
 import itertools
 from pathlib import Path
 import hashlib
+import time
 
 import pandas as pd
 
@@ -51,6 +52,21 @@ def run_backtest(symbol: str, timeframe: str, years: int, cfg: AppConfig, param_
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     csv_path = artifacts_dir / "backtest_results.csv"
 
+    # CSV hygiene and run metadata
+    MIN_TRADES = int(getattr(cfg, "min_trades", 30))
+    run_id = int(time.time())
+
+    # Map timeframe to bars per year for Sharpe
+    tf_map = {
+        "1m": 365 * 24 * 60,
+        "5m": 365 * 24 * 12,
+        "15m": 365 * 24 * 4,
+        "1h": 365 * 24,
+        "4h": 365 * 6,
+        "1d": 365,
+    }
+    periods_per_year = float(tf_map.get(timeframe, 365 * 24))
+
     for combo in combos:
         params = dict(zip(keys, combo))
         # Override cfg by creating a shallow copy
@@ -86,6 +102,8 @@ def run_backtest(symbol: str, timeframe: str, years: int, cfg: AppConfig, param_
                 break
 
         tr = broker.trade_log
+        n_trades = len(tr)
+        returns = pd.Series(equity_curve).pct_change().dropna().values
         metrics = {
             "cagr": cagr(equity_curve, max(1, years)),
             "max_dd": max_drawdown(equity_curve),
@@ -93,13 +111,15 @@ def run_backtest(symbol: str, timeframe: str, years: int, cfg: AppConfig, param_
             "pf": profit_factor(tr),
             "expectancy": expectancy(tr),
             "avg_trade": avg_trade(tr),
-            "sharpe": sharpe(pd.Series(equity_curve).pct_change().dropna().values),
+            "sharpe": sharpe(returns, periods_per_year=periods_per_year),
+            "n_trades": n_trades,
         }
-        rec = {**params, **metrics, "equity": equity_curve}
+        rec = {**params, **metrics, "equity": equity_curve, "run_id": run_id}
         results.append(rec)
 
         # Append CSV row
-        row = {**params, **metrics}
+        valid_row = n_trades >= MIN_TRADES
+        row = {**params, **metrics, "valid_row": valid_row, "run_id": run_id}
         header = not csv_path.exists()
         import csv
 

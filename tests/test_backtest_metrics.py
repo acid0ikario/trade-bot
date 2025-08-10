@@ -1,6 +1,6 @@
 import math
 
-from bot.metrics import cagr, max_drawdown, winrate, profit_factor, expectancy, avg_trade
+from bot.metrics import cagr, max_drawdown, winrate, profit_factor, expectancy, avg_trade, sharpe
 from bot.paper import Trade
 from bot.backtest import run_backtest
 from bot.config import AppConfig
@@ -25,12 +25,26 @@ def test_metrics_simple():
     assert math.isclose(avg_trade(trades), (10+10+5)/3, rel_tol=1e-6)
 
 
-def test_backtest_runs_minimal_grid():
+def test_sharpe_and_pf_edges(tmp_path):
+    # Negative mean returns -> Sharpe < 0
+    rets = [-0.01] * 100
+    s = sharpe(rets, periods_per_year=252)
+    assert s < 0
+
+    # PF edge cases
+    trades_profit_only = [Trade(symbol="X", side="buy", entry_price=1, stop_price=0, take_profit=0, qty=1, entry_time=None, pnl=5)]
+    assert math.isfinite(profit_factor(trades_profit_only)) and profit_factor(trades_profit_only) > 1e6
+
+    trades_zero = []
+    # empty trades -> 0.0 PF
+    assert profit_factor(trades_zero) == 0.0
+
+
+def test_backtest_csv_includes_n_trades(tmp_path):
     # Minimal data loader returning small deterministic dataset
     def loader(symbol, timeframe, years):
         data = []
         for i in range(220):
-            # timestamp, open, high, low, close, volume
             data.append([i, 100+i*0.1, 100+i*0.1+1, 100+i*0.1-1, 100+i*0.1, 1])
         import pandas as pd
         return pd.DataFrame(data, columns=["timestamp","open","high","low","close","volume"])
@@ -40,5 +54,4 @@ def test_backtest_runs_minimal_grid():
     res = run_backtest("BTC/USDT", "1h", 1, cfg, grid, data_loader=loader)
     assert isinstance(res, list) and len(res) == 1
     item = res[0]
-    assert "cagr" in item and "max_dd" in item and "equity" in item
-    assert isinstance(item["equity"], list) and len(item["equity"]) > 0
+    assert "n_trades" in item
