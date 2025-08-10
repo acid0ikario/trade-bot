@@ -38,10 +38,11 @@ def make_df_from_close(close):
     return pd.DataFrame({"open": open_, "high": high, "low": low, "close": close, "volume": vol})
 
 
-def build_data_map():
+def build_data_map(rho=0.95):
     n = 250
-    p_btc, p_eth = gen_series(n=n, rho=0.95, seed=42)
-    p_bnb = 100 + np.cumsum(np.random.default_rng(7).normal(0, 1, n) * 0.1)  # less correlated
+    p_btc, p_eth = gen_series(n=n, rho=rho, seed=42)
+    # Independent series for BNB
+    p_bnb = 100 + np.cumsum(np.random.default_rng(7).normal(0, 1, n) * 0.1)
 
     df_btc = make_df_from_close(p_btc)
     df_eth = make_df_from_close(p_eth)
@@ -81,9 +82,11 @@ def cfg_env():
 
 def test_correlation_guard_blocks_over_cap(monkeypatch, cfg_env):
     cfg, env = cfg_env
-    data_map = build_data_map()
+    data_map = build_data_map(rho=0.95)
     dummy = DummyExchange(data_map)
     monkeypatch.setattr("bot.runner.Exchange", lambda cfg, env: dummy)
+    # Force signals to buy deterministically
+    monkeypatch.setattr("bot.runner.generate_signal", lambda df, cfg: "buy")
 
     broker = run_paper(cfg, env, max_iterations=1)
 
@@ -91,20 +94,40 @@ def test_correlation_guard_blocks_over_cap(monkeypatch, cfg_env):
     # expect at most 1 of (BTC, ETH) to be opened; BNB can be opened as uncorrelated
     opened = set(broker.open_positions.keys())
     assert len(opened.intersection({"BTC/USDT", "ETH/USDT"})) <= 1
-    # Allow up to max_open_trades, but per our synthetic data, at least BNB should be eligible
+    # Allow up to max_open_trades
     assert len(opened) <= cfg.max_open_trades
 
 
 def test_per_pair_caps_enforced(monkeypatch, cfg_env):
     cfg, env = cfg_env
-    data_map = build_data_map()
+    data_map = build_data_map(rho=0.1)
     dummy = DummyExchange(data_map)
     monkeypatch.setattr("bot.runner.Exchange", lambda cfg, env: dummy)
+    monkeypatch.setattr("bot.runner.generate_signal", lambda df, cfg: "buy")
 
     # Tight per-pair cap so that position size is reduced below raw risk-based sizing
     cfg.max_notional_usdt_per_pair = 20
 
     broker = run_paper(cfg, env, max_iterations=1)
 
+    for sym, t in broker.open_positions.items():
+        assert t.entry_price * t.qty <= cfg.max_notional_usdt_per_pair + 1e-6
+
+
+def test_low_correlation_allows_multiple(monkeypatch, cfg_env):
+    cfg, env = cfg_env
+    # Lower correlation so guard should allow more
+    data_map = build_data_map(rho=0.1)
+    dummy = DummyExchange(data_map)
+    monkeypatch.setattr("bot.runner.Exchange", lambda cfg, env: dummy)
+    monkeypatch.setattr("bot.runner.generate_signal", lambda df, cfg: "buy")
+
+    # Allow only 2 simultaneous trades
+    cfg.max_open_trades = 2
+    broker = run_paper(cfg, env, max_iterations=1)
+
+    opened = set(broker.open_positions.keys())
+    assert len(opened) == cfg.max_open_trades
+    # Per-pair caps respected
     for sym, t in broker.open_positions.items():
         assert t.entry_price * t.qty <= cfg.max_notional_usdt_per_pair + 1e-6

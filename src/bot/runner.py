@@ -270,6 +270,13 @@ def run_paper(cfg: AppConfig, env: EnvVars, *, max_iterations: int = 3, sleep_se
             except Exception:
                 qty = 0.0
             if qty > 0:
+                # Enforce per-pair notional cap by resizing qty if needed
+                cap = per_pair_cap(symbol)
+                notional = entry * qty
+                if notional > cap > 0:
+                    qty = cap / max(entry, 1e-12)
+                if qty <= 0:
+                    continue
                 t = broker.buy(symbol, entry, qty, stop, tp)
                 last_signal_ts[symbol] = ref_ts
                 msg = f"BUY {t.symbol} qty={t.qty} entry={t.entry_price} stop={t.stop_price} tp={t.take_profit}"
