@@ -55,3 +55,25 @@ Nightly workflow runs a small backtest grid, evaluates metrics, and uploads arti
   - `MAX_DD_THRESHOLD` (default `-0.20`)
 - On regression, a GitHub Issue is created using the Backtest Regression template with key metrics and links to artifacts.
 
+## Optimizer and A/B Backtests
+
+Optimize strategy defaults from prior backtests and compare filter variants.
+
+- Generate optimized defaults from CSV:
+
+```bash
+poetry run python -m bot.optimize --results data/artifacts/backtest_results.csv
+# Outputs: data/artifacts/optimized_defaults.yaml
+```
+
+- Run A/B comparisons (baseline, ADX only, Volume only, both):
+
+```bash
+poetry run python -m bot.optimize --ab --symbol BTC/USDT --timeframe 1h --years 1
+# Outputs: data/artifacts/ab_results.csv and data/artifacts/ab_summary.txt
+```
+
+- Adopt optimized defaults:
+  - Open `data/artifacts/optimized_defaults.yaml` and merge keys into your `config/config.yaml` under the same names (ema_fast, ema_slow, rsi bounds, atr_k, risk_rr).
+  - Optionally enable filters by setting `enable_adx` and/or `enable_vol_filter` to true and adjust `volume_factor`.
+

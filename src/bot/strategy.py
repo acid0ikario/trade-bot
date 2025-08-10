@@ -150,6 +150,24 @@ def generate_signal(df: pd.DataFrame, cfg: AppConfig) -> Optional[str]:
     tol = (float(cfg.slippage_bps) / 10000.0) * abs(close_val)
     cond_close_above_fast = close_val + tol >= ema_fast_val
 
-    if pullback and cond_trend and cond_momentum and cond_close_above_fast:
+    # Optional gating: ADX and Volume filters only when enabled
+    cond_adx = True
+    if getattr(cfg, "enable_adx", False):
+        if "adx" not in work.columns:
+            work = calculate_indicators(work, cfg)
+        adx_threshold = float(getattr(cfg, "adx_threshold", 20.0))
+        adx_val = float(work.iloc[i].get("adx", 0.0))
+        cond_adx = adx_val >= adx_threshold
+
+    cond_vol = True
+    if getattr(cfg, "enable_vol_filter", False):
+        if "vol_sma" not in work.columns:
+            work = calculate_indicators(work, cfg)
+        vf = float(getattr(cfg, "volume_factor", 1.5))
+        vol = float(work.iloc[i]["volume"])  # type: ignore[index]
+        vol_sma = float(work.iloc[i].get("vol_sma", vol * 10))  # if missing, pass
+        cond_vol = vol >= vf * vol_sma
+
+    if pullback and cond_trend and cond_momentum and cond_close_above_fast and cond_adx and cond_vol:
         return "buy"
     return None

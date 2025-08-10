@@ -13,6 +13,9 @@ ema_slow: 200
 rsi_period: 14
 rsi_buy_min: 45
 rsi_buy_max: 60
+enable_adx: false
+enable_vol_filter: false
+volume_factor: 1.5
 max_notional_per_trade_usdt: 200
 max_notional_usdt_per_pair: 200
 max_correlated_trades: 2

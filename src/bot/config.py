@@ -27,6 +27,11 @@ class AppConfig(BaseModel):
     rsi_buy_min: int = 45
     rsi_buy_max: int = 60
 
+    # Optional indicator filter flags
+    enable_adx: bool = False
+    enable_vol_filter: bool = False
+    volume_factor: float = 1.5
+
     # Legacy per-trade cap (kept for backward compatibility)
     max_notional_per_trade_usdt: float = 200
 
